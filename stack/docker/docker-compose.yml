@@ -1,0 +1,42 @@
+version: '3.1'
+
+services:
+  redis:
+    image: redis:latest
+    container_name: redis
+    restart: always
+    ports:
+      - "1000:6379"
+    command: redis-server --save 20 1 --loglevel warning --requirepass 1234
+    environment:
+      - REDIS_REPLICATION_MODE=master
+      - REDIS_PASSWORD=1234
+    volumes:
+      - redisData:/data
+    networks:
+      - project_net
+
+  postgresql:
+    image: ankane/pgvector
+    container_name: postgres
+    ports:
+      - "5432:5432"
+    restart: always
+    environment:
+      - POSTGRES_DB=project_name
+      - POSTGRES_USER=precious
+      - POSTGRES_PASSWORD=password
+    volumes:
+      - PostgresData:/var/lib/postgresql/data
+    networks:
+      - project_net
+
+volumes:
+  PostgresData:
+  redisData:
+  minio_data:
+    driver: local
+
+networks:
+  project_net:
+    driver: bridge
