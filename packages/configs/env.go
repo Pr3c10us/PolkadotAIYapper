@@ -60,6 +60,14 @@ type SMTP struct {
 	Password    string
 }
 
+type XDotCom struct {
+	ConsumerKey    string
+	ConsumerSecret string
+	AccessKey      string
+	AccessSecret   string
+	BearerToken    string
+}
+
 type EnvironmentVariables struct {
 	Port                  string
 	JWTSecret             string
@@ -80,6 +88,7 @@ type EnvironmentVariables struct {
 	OAuthProvider         *OAuthProvider
 	SMTP                  *SMTP
 	OpenAIApiKey          string
+	XDotCom               *XDotCom
 }
 
 func loadEnv() {
@@ -141,6 +150,13 @@ func LoadEnvironment() *EnvironmentVariables {
 			Password:    getEnvOrError("SMTP_PASSWORD"),
 		},
 		OpenAIApiKey: getEnvOrError("OPENAI_API_KEY"),
+		XDotCom: &XDotCom{
+			ConsumerKey:    getEnvOrError("CONSUMERKEY"),
+			ConsumerSecret: getEnvOrError("CONSUMERSECRET"),
+			AccessKey:      getEnvOrError("ACCESS_KEY"),
+			AccessSecret:   getEnvOrError("ACCESS_SECRET"),
+			BearerToken:    getEnvOrError("BEARERTOKEN"),
+		},
 	}
 }
 

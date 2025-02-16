@@ -3,6 +3,7 @@ package tweet
 import (
 	"github.com/Pr3c10us/boilerplate/internals/domains/embedding"
 	"github.com/Pr3c10us/boilerplate/internals/domains/llm"
+	"github.com/Pr3c10us/boilerplate/internals/domains/xdotcom"
 	"github.com/Pr3c10us/boilerplate/internals/services/tweet/command"
 )
 
@@ -18,10 +19,10 @@ type Commands struct {
 type Queries struct {
 }
 
-func NewTweetService(llm llm.Repository, embedding embedding.Repository) Services {
+func NewTweetService(llm llm.Repository, embedding embedding.Repository, xdotcom xdotcom.Repository) Services {
 	return Services{
 		Commands: Commands{
-			Tweet: command.NewTweet(llm, embedding),
+			Tweet: command.NewTweet(llm, embedding, xdotcom),
 		},
 		Queries: Queries{},
 	}

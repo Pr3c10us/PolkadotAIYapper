@@ -6,16 +6,18 @@ import (
 	"fmt"
 	"github.com/Pr3c10us/boilerplate/internals/domains/embedding"
 	"github.com/Pr3c10us/boilerplate/internals/domains/llm"
+	"github.com/Pr3c10us/boilerplate/internals/domains/xdotcom"
 	"math/rand"
 )
 
 type Tweet struct {
 	llm       llm.Repository
 	embedding embedding.Repository
+	xdotcom   xdotcom.Repository
 }
 
-func NewTweet(llm llm.Repository, embedding embedding.Repository) *Tweet {
-	return &Tweet{llm: llm, embedding: embedding}
+func NewTweet(llm llm.Repository, embedding embedding.Repository, xdotcom xdotcom.Repository) *Tweet {
+	return &Tweet{llm: llm, embedding: embedding, xdotcom: xdotcom}
 }
 
 func (service *Tweet) Handle() (bool, error) {
@@ -71,6 +73,15 @@ func (service *Tweet) Handle() (bool, error) {
 		return false, err
 	}
 	println(topic)
+
+	id, err := service.xdotcom.Tweet(xdotcom.Tweet{
+		Text:            topic,
+		PreviousTweetID: "1891253807855640993",
+	})
+	fmt.Println("id", id)
+	if err != nil {
+		return false, err
+	}
 
 	return false, nil
 }

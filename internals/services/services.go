@@ -14,6 +14,6 @@ type Services struct {
 func NewServices(adapters *adapters.Adapters) *Services {
 	return &Services{
 		AuthenticationServices: authentication.NewAuthenticationService(adapters.EmailRepository, adapters.CacheRepository, adapters.EnvironmentVariables, adapters.AuthenticationRepository),
-		TweetService:           tweet.NewTweetService(adapters.OpenAiRepository, adapters.EmbeddingRepository),
+		TweetService:           tweet.NewTweetService(adapters.OpenAiRepository, adapters.EmbeddingRepository, adapters.XDotComRepository),
 	}
 }

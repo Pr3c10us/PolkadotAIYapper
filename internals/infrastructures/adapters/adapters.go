@@ -8,11 +8,13 @@ import (
 	"github.com/Pr3c10us/boilerplate/internals/domains/embedding"
 	"github.com/Pr3c10us/boilerplate/internals/domains/llm"
 	"github.com/Pr3c10us/boilerplate/internals/domains/sms"
+	"github.com/Pr3c10us/boilerplate/internals/domains/xdotcom"
 	authentication2 "github.com/Pr3c10us/boilerplate/internals/infrastructures/adapters/authentication"
 	cache2 "github.com/Pr3c10us/boilerplate/internals/infrastructures/adapters/cache"
 	email2 "github.com/Pr3c10us/boilerplate/internals/infrastructures/adapters/email"
 	embedding2 "github.com/Pr3c10us/boilerplate/internals/infrastructures/adapters/embedding"
 	openai2 "github.com/Pr3c10us/boilerplate/internals/infrastructures/adapters/llm/openai"
+	xdotcom2 "github.com/Pr3c10us/boilerplate/internals/infrastructures/adapters/xdotcom"
 	"github.com/Pr3c10us/boilerplate/packages/configs"
 	"github.com/Pr3c10us/boilerplate/packages/logger"
 	"github.com/openai/openai-go"
@@ -36,6 +38,7 @@ type Adapters struct {
 	CacheRepository          cache.Repository
 	OpenAiRepository         llm.Repository
 	EmbeddingRepository      embedding.Repository
+	XDotComRepository        xdotcom.Repository
 }
 
 func NewAdapters(dependencies AdapterDependencies) *Adapters {
@@ -47,5 +50,6 @@ func NewAdapters(dependencies AdapterDependencies) *Adapters {
 		CacheRepository:          cache2.NewRedisRepository(dependencies.Redis, dependencies.EnvironmentVariables),
 		OpenAiRepository:         openai2.NewOpenAIRepository(dependencies.OpenAI),
 		EmbeddingRepository:      embedding2.NewEmbedding(dependencies.DB),
+		XDotComRepository:        xdotcom2.NewXDotComRepository(dependencies.EnvironmentVariables),
 	}
 }
