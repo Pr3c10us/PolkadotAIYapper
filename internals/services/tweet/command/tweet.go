@@ -22,7 +22,7 @@ func NewTweet(llm llm.Repository, embedding embedding.Repository, xdotcom xdotco
 
 func (service *Tweet) Handle() (bool, error) {
 	topicType := service.RandomTopicType()
-	var topic string
+	var topic, context string
 	var err error
 
 	switch topicType {
@@ -65,20 +65,18 @@ func (service *Tweet) Handle() (bool, error) {
 		return true, errors.New("topic tweeted")
 	}
 
-	// generate tweet
-
-	//embed topic
 	err = service.embedding.AddEmbedding(embeddingStr, topic)
 	if err != nil {
 		return false, err
 	}
-	println(topic)
 
-	id, err := service.xdotcom.Tweet(xdotcom.Tweet{
-		Text:            topic,
-		PreviousTweetID: "1891253807855640993",
-	})
-	fmt.Println("id", id)
+	tweets, err := service.GetTweet(topic, context)
+	if err != nil {
+		return false, err
+	}
+	println("tweet", tweets)
+
+	err = service.SendTweet(tweets)
 	if err != nil {
 		return false, err
 	}
@@ -168,4 +166,58 @@ func (service *Tweet) TopicAlreadyTweeted(topic string) (*bool, []float32, error
 	}
 
 	return used, tweetEmbedding, nil
+}
+
+func (service *Tweet) GetTweet(topic, context string) ([]string, error) {
+	tweetTypes := []string{"short", "thread"}
+	//tweetType := tweetTypes[rand.Intn(len(tweetTypes)-0)]
+	tweetType := tweetTypes[1]
+
+	var prompt string
+	if tweetType == "short" {
+		prompt = service.ShortTweetPrompt(topic, context)
+	} else {
+		prompt = service.TweetThreadPrompt(topic, context)
+	}
+
+	switch tweetType {
+	case "short":
+		response, err := service.llm.Prompt(prompt)
+		if err != nil {
+			fmt.Println(err)
+			return nil, err
+		}
+		fmt.Println(response)
+		return []string{response}, nil
+	default:
+		response, err := service.llm.Prompt(prompt)
+		if err != nil {
+			fmt.Println(err)
+			return nil, err
+		}
+		fmt.Println(response)
+
+		tweets, err := service.convertToArray(response)
+		if err != nil {
+			fmt.Println(err)
+			return nil, err
+		}
+
+		return tweets, nil
+	}
+}
+
+func (service *Tweet) SendTweet(tweets []string) error {
+	prevTweetID := ""
+	for _, tweet := range tweets {
+		id, err := service.xdotcom.Tweet(xdotcom.Tweet{
+			Text:            tweet,
+			PreviousTweetID: prevTweetID,
+		})
+		if err != nil {
+			return err
+		}
+		prevTweetID = id
+	}
+	return nil
 }
