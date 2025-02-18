@@ -208,7 +208,7 @@ func (service *Tweet) TopicAlreadyTweeted(topic string) (*bool, []float32, error
 func (service *Tweet) GetTweet(topic, context string) ([]string, error) {
 	tweetTypes := []string{"short", "thread"}
 	tweetType := tweetTypes[rand.Intn(len(tweetTypes)-0)]
-	//tweetType := tweetTypes[1]
+	//tweetType := tweetTypes[0]
 
 	var prompt string
 	if tweetType == "short" {
@@ -223,6 +223,15 @@ func (service *Tweet) GetTweet(topic, context string) ([]string, error) {
 		if err != nil {
 			fmt.Println(err)
 			return nil, err
+		}
+		if strings.HasPrefix(response, "\"") && strings.HasSuffix(response, "\"") {
+			// Remove the code block markers
+			trimmedInput := strings.TrimPrefix(response, "\"")
+			trimmedInput = strings.TrimSuffix(trimmedInput, "\"")
+
+			// Trim any extra spaces, newlines, or tabs around the JSON content
+			trimmedInput = strings.TrimSpace(trimmedInput)
+			return []string{trimmedInput}, nil
 		}
 		return []string{response}, nil
 	default:
