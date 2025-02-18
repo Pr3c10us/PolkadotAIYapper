@@ -8,6 +8,7 @@ import (
 	"github.com/Pr3c10us/boilerplate/internals/domains/llm"
 	"github.com/Pr3c10us/boilerplate/internals/domains/xdotcom"
 	"math/rand"
+	"strings"
 )
 
 type Tweet struct {
@@ -20,7 +21,7 @@ func NewTweet(llm llm.Repository, embedding embedding.Repository, xdotcom xdotco
 	return &Tweet{llm: llm, embedding: embedding, xdotcom: xdotcom}
 }
 
-func (service *Tweet) Handle() (bool, error) {
+func (service *Tweet) Tweets() ([]string, bool, error) {
 	topicType := service.RandomTopicType()
 	var topic, context string
 	var err error
@@ -37,7 +38,7 @@ func (service *Tweet) Handle() (bool, error) {
 			break
 		}
 		if count >= 5 {
-			return true, errors.New("error getting appropriate response from model")
+			return nil, true, errors.New("error getting appropriate response from model")
 		}
 
 	case JAM:
@@ -52,36 +53,47 @@ func (service *Tweet) Handle() (bool, error) {
 			break
 		}
 		if count >= 5 {
-			return true, errors.New("error getting appropriate response from model")
+			return nil, true, errors.New("error getting appropriate response from model")
 		}
 	}
 
-	fmt.Println("topic", topic)
+	if topic == "" {
+		return nil, true, errors.New("no topic")
+	}
 	topicTweeted, embeddingStr, err := service.TopicAlreadyTweeted(topic)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 	if *topicTweeted {
-		return true, errors.New("topic tweeted")
+		return nil, true, errors.New("topic tweeted")
 	}
 
 	err = service.embedding.AddEmbedding(embeddingStr, topic)
 	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 
 	tweets, err := service.GetTweet(topic, context)
 	if err != nil {
-		return false, err
-	}
-	println("tweet", tweets)
-
-	err = service.SendTweet(tweets)
-	if err != nil {
-		return false, err
+		return nil, false, err
 	}
 
-	return false, nil
+	return tweets, false, nil
+}
+
+func (service *Tweet) SendTweet(tweets []string) error {
+	prevTweetID := ""
+	for _, tweet := range tweets {
+		id, err := service.xdotcom.Tweet(xdotcom.Tweet{
+			Text:            tweet,
+			PreviousTweetID: prevTweetID,
+		})
+		if err != nil {
+			return err
+		}
+		prevTweetID = id
+	}
+	return nil
 }
 
 const (
@@ -101,6 +113,31 @@ func (service *Tweet) RandomTopicType() string {
 }
 
 func (service *Tweet) convertToArray(input string) ([]string, error) {
+	if strings.HasPrefix(input, "```json") && strings.HasSuffix(input, "```") {
+		// Remove the code block markers
+		trimmedInput := strings.TrimPrefix(input, "```json")
+		trimmedInput = strings.TrimSuffix(trimmedInput, "```")
+
+		// Trim any extra spaces, newlines, or tabs around the JSON content
+		trimmedInput = strings.TrimSpace(trimmedInput)
+
+		// Remove newlines and extra spaces inside the JSON string (if required)
+		// Only if you're sure that the newlines should not be part of the actual data
+		// this will collapse all the lines into a single line
+		trimmedInput = strings.ReplaceAll(trimmedInput, "\n", "")
+
+		// Parse the JSON string into a slice of strings
+		var data []string
+		err := json.Unmarshal([]byte(trimmedInput), &data)
+		if err != nil {
+			// Handle JSON parsing error
+			fmt.Println("Error parsing JSON:", err)
+			return nil, err
+		}
+
+		// Return the parsed data
+		return data, nil
+	}
 	var result []string
 	err := json.Unmarshal([]byte(input), &result)
 	if err != nil {
@@ -170,8 +207,8 @@ func (service *Tweet) TopicAlreadyTweeted(topic string) (*bool, []float32, error
 
 func (service *Tweet) GetTweet(topic, context string) ([]string, error) {
 	tweetTypes := []string{"short", "thread"}
-	//tweetType := tweetTypes[rand.Intn(len(tweetTypes)-0)]
-	tweetType := tweetTypes[1]
+	tweetType := tweetTypes[rand.Intn(len(tweetTypes)-0)]
+	//tweetType := tweetTypes[1]
 
 	var prompt string
 	if tweetType == "short" {
@@ -187,7 +224,6 @@ func (service *Tweet) GetTweet(topic, context string) ([]string, error) {
 			fmt.Println(err)
 			return nil, err
 		}
-		fmt.Println(response)
 		return []string{response}, nil
 	default:
 		response, err := service.llm.Prompt(prompt)
@@ -195,7 +231,6 @@ func (service *Tweet) GetTweet(topic, context string) ([]string, error) {
 			fmt.Println(err)
 			return nil, err
 		}
-		fmt.Println(response)
 
 		tweets, err := service.convertToArray(response)
 		if err != nil {
@@ -205,19 +240,4 @@ func (service *Tweet) GetTweet(topic, context string) ([]string, error) {
 
 		return tweets, nil
 	}
-}
-
-func (service *Tweet) SendTweet(tweets []string) error {
-	prevTweetID := ""
-	for _, tweet := range tweets {
-		id, err := service.xdotcom.Tweet(xdotcom.Tweet{
-			Text:            tweet,
-			PreviousTweetID: prevTweetID,
-		})
-		if err != nil {
-			return err
-		}
-		prevTweetID = id
-	}
-	return nil
 }

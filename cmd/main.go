@@ -9,6 +9,7 @@ import (
 	"github.com/Pr3c10us/boilerplate/packages/logger"
 	"github.com/Pr3c10us/boilerplate/packages/utils"
 	"github.com/redis/go-redis/v9"
+	"log"
 )
 
 var (
@@ -40,6 +41,10 @@ func main() {
 	newAdapters := adapters.NewAdapters(adapterDependencies)
 	newServices := services.NewServices(newAdapters)
 	newPort := ports.NewPorts(newServices, newLogger, environmentVariables)
-	newPort.GinServer.Run()
-
+	scheduler := newPort.Scheduler
+	if err := scheduler.Initialize(); err != nil {
+		log.Fatalf("Failed to initialize scheduler: %v", err)
+	}
+	go newPort.GinServer.Run()
+	scheduler.Run()
 }

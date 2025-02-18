@@ -25,12 +25,12 @@ func NewTweetHandler(service tweet.Services, environmentVariables *configs.Envir
 }
 
 func (handler *Handler) Topic(context *gin.Context) {
-	_, err := handler.services.Tweet.Handle()
+	tweets, _, err := handler.services.Tweet.Tweets()
 	if err != nil {
-		//_ = context.Error(err)
+		_ = context.Error(err)
 		//fmt.Println(err)
 		return
 	}
 
-	response.NewSuccessResponse("", nil, nil).Send(context)
+	response.NewSuccessResponse("", gin.H{"tweets": tweets}, nil).Send(context)
 }

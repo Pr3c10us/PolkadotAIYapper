@@ -151,11 +151,11 @@ func LoadEnvironment() *EnvironmentVariables {
 		},
 		OpenAIApiKey: getEnvOrError("OPENAI_API_KEY"),
 		XDotCom: &XDotCom{
-			ConsumerKey:    getEnvOrError("CONSUMERKEY"),
-			ConsumerSecret: getEnvOrError("CONSUMERSECRET"),
+			ConsumerKey:    getEnvOrError("CONSUMER_KEY"),
+			ConsumerSecret: getEnvOrError("CONSUMER_SECRET"),
 			AccessKey:      getEnvOrError("ACCESS_KEY"),
 			AccessSecret:   getEnvOrError("ACCESS_SECRET"),
-			BearerToken:    getEnvOrError("BEARERTOKEN"),
+			BearerToken:    getEnvOrError("BEARER_TOKEN"),
 		},
 	}
 }

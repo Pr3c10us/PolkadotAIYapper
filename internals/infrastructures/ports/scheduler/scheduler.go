@@ -1,11 +1,13 @@
-package main
+package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/Pr3c10us/boilerplate/internals/services"
 	"github.com/Pr3c10us/boilerplate/packages/configs"
 	"log"
+	"math"
 	"math/rand"
 	"sync"
 	"time"
@@ -24,42 +26,148 @@ type PostingWindow struct {
 	EndHour   int
 }
 
+func (w PostingWindow) Duration() int {
+	return w.EndHour - w.StartHour + 1
+}
+
 type DailySchedule struct {
 	Windows []PostingWindow
 }
 
-// Schedule holds optimal posting times for each day
+func (d DailySchedule) TotalHours() int {
+	total := 0
+	for _, window := range d.Windows {
+		total += window.Duration()
+	}
+	return total
+}
+
+type TweetDistribution struct {
+	Window     PostingWindow
+	TweetCount int
+	Intervals  []time.Time
+}
+
+func (s *Scheduler) calculateDailyDistribution() ([]TweetDistribution, error) {
+	now := time.Now().In(s.location)
+	daySchedule := WeeklySchedule[now.Weekday().String()]
+
+	// Get remaining tweets for today
+	quotaKey := RedisKeyPrefix + "daily_quota"
+	remainingTweets, err := s.rdb.Get(s.ctx, quotaKey).Int()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get remaining tweets: %v", err)
+	}
+
+	totalHours := daySchedule.TotalHours()
+	var distributions []TweetDistribution
+
+	// Calculate tweets per hour, distributing remaining tweets across available hours
+	tweetsPerHour := float64(remainingTweets) / float64(totalHours)
+
+	for _, window := range daySchedule.Windows {
+		// Calculate tweets for this window based on its duration
+		windowDuration := window.Duration()
+		windowTweets := int(math.Round(tweetsPerHour * float64(windowDuration)))
+
+		if windowTweets > 0 {
+			// Generate posting times within the window
+			intervals := generatePostingTimes(window, windowTweets, now)
+
+			distributions = append(distributions, TweetDistribution{
+				Window:     window,
+				TweetCount: windowTweets,
+				Intervals:  intervals,
+			})
+		}
+	}
+
+	return distributions, nil
+}
+
+func generatePostingTimes(window PostingWindow, tweetCount int, today time.Time) []time.Time {
+	var times []time.Time
+
+	// Create time range for the window
+	start := time.Date(
+		today.Year(), today.Month(), today.Day(),
+		window.StartHour, 0, 0, 0, today.Location(),
+	)
+	end := time.Date(
+		today.Year(), today.Month(), today.Day(),
+		window.EndHour, 59, 59, 0, today.Location(),
+	)
+
+	// Calculate duration and divide it into intervals
+	duration := end.Sub(start)
+	if tweetCount > 1 {
+		intervalDuration := duration / time.Duration(tweetCount-1)
+
+		// Add some randomness to each interval (±30% of interval)
+		for i := 0; i < tweetCount; i++ {
+			baseTime := start.Add(time.Duration(i) * intervalDuration)
+
+			// Add random jitter (±30% of interval)
+			maxJitter := int64(intervalDuration) * 30 / 100
+			jitter := time.Duration(rand.Int63n(maxJitter*2) - maxJitter)
+
+			postTime := baseTime.Add(jitter)
+
+			// Ensure time stays within window
+			if postTime.Before(start) {
+				postTime = start
+			} else if postTime.After(end) {
+				postTime = end
+			}
+
+			times = append(times, postTime)
+		}
+	} else if tweetCount == 1 {
+		// For single tweet, pick random time within window
+		randomDuration := time.Duration(rand.Int63n(int64(duration)))
+		times = append(times, start.Add(randomDuration))
+	}
+
+	return times
+}
+
+type ScheduledTweet struct {
+	PostTime time.Time
+	Executed bool
+}
+
 var WeeklySchedule = map[string]DailySchedule{
 	"Monday": {
 		Windows: []PostingWindow{
-			{StartHour: 10, EndHour: 10},
+			{StartHour: 10, EndHour: 11},
 			{StartHour: 14, EndHour: 16},
+			{StartHour: 19, EndHour: 20},
 		},
 	},
 	"Tuesday": {
 		Windows: []PostingWindow{
-			{StartHour: 9, EndHour: 9},
+			{StartHour: 9, EndHour: 10},
 			{StartHour: 13, EndHour: 15},
-			{StartHour: 22, EndHour: 22},
+			{StartHour: 22, EndHour: 23},
 		},
 	},
 	"Wednesday": {
 		Windows: []PostingWindow{
-			{StartHour: 9, EndHour: 9},
+			{StartHour: 9, EndHour: 10},
 			{StartHour: 13, EndHour: 15},
 			{StartHour: 17, EndHour: 19},
 		},
 	},
 	"Thursday": {
 		Windows: []PostingWindow{
-			{StartHour: 9, EndHour: 9},
+			{StartHour: 9, EndHour: 10},
 			{StartHour: 14, EndHour: 16},
 			{StartHour: 20, EndHour: 22},
 		},
 	},
 	"Friday": {
 		Windows: []PostingWindow{
-			{StartHour: 9, EndHour: 9},
+			{StartHour: 9, EndHour: 10},
 			{StartHour: 14, EndHour: 16},
 		},
 	},
@@ -85,10 +193,11 @@ type Scheduler struct {
 	environment *configs.EnvironmentVariables
 }
 
-func NewScheduler(services *services.Services, environment *configs.EnvironmentVariables) (*Scheduler, error) {
+func NewScheduler(services *services.Services, environment *configs.EnvironmentVariables) *Scheduler {
 	est, err := time.LoadLocation("America/New_York")
 	if err != nil {
-		return nil, fmt.Errorf("failed to load EST timezone: %v", err)
+		fmt.Println(err)
+		panic("failed to load EST timezone: %v")
 	}
 
 	rdb := redis.NewClient(&redis.Options{
@@ -102,7 +211,8 @@ func NewScheduler(services *services.Services, environment *configs.EnvironmentV
 
 	// Test Redis connection
 	if err := rdb.Ping(ctx).Err(); err != nil {
-		return nil, fmt.Errorf("failed to connect to Redis: %v", err)
+		fmt.Println(err)
+		panic("failed to connect to Redis: %v")
 	}
 
 	return &Scheduler{
@@ -111,7 +221,7 @@ func NewScheduler(services *services.Services, environment *configs.EnvironmentV
 		location:    est,
 		services:    services,
 		environment: environment,
-	}, nil
+	}
 }
 
 func (s *Scheduler) Initialize() error {
@@ -138,13 +248,13 @@ func (s *Scheduler) resetDailyQuota() error {
 	// Use Redis transaction to update both values atomically
 	txf := func(tx *redis.Tx) error {
 		// Set new quota
-		if err := tx.Set(s.ctx, quotaKey, DailyTweetLimit, 24*time.Hour).Err(); err != nil {
+		if err := tx.Set(s.ctx, quotaKey, DailyTweetLimit, 0).Err(); err != nil {
 			return err
 		}
 
-		// Update last reset timestamp
+		// Update last reset timestamp using RFC3339 format
 		now := time.Now().In(s.location)
-		if err := tx.Set(s.ctx, timestampKey, now.Unix(), 24*time.Hour).Err(); err != nil {
+		if err := tx.Set(s.ctx, timestampKey, now.Format(time.RFC3339), 0).Err(); err != nil {
 			return err
 		}
 
@@ -153,11 +263,11 @@ func (s *Scheduler) resetDailyQuota() error {
 
 	// Retry transaction if it fails due to WATCH
 	for i := 0; i < 3; i++ {
-		err := s.rdb.Watch(s.ctx, txf, quotaKey)
+		err := s.rdb.Watch(s.ctx, txf, quotaKey, timestampKey)
 		if err == nil {
 			return nil
 		}
-		if err == redis.TxFailedErr {
+		if errors.Is(err, redis.TxFailedErr) {
 			continue
 		}
 		return fmt.Errorf("failed to reset quota: %v", err)
@@ -192,7 +302,7 @@ func (s *Scheduler) ReserveTweetCapacity(count int) (bool, error) {
 		if err == nil {
 			return true, nil
 		}
-		if err == redis.TxFailedErr {
+		if errors.Is(err, redis.TxFailedErr) {
 			continue
 		}
 		if err.Error() == "insufficient quota" {
@@ -250,58 +360,111 @@ func (s *Scheduler) ReleaseLock(lockKey string) error {
 	return nil
 }
 
-func (s *Scheduler) Run() {
-	ticker := time.NewTicker(5 * time.Minute)
-	defer ticker.Stop()
+func (s *Scheduler) checkAndResetQuota() error {
+	timestampKey := RedisKeyPrefix + "last_reset"
 
-	for range ticker.C {
-		if !s.IsWithinPostingWindow() {
-			continue
-		}
+	// Get last reset timestamp
+	lastResetStr, err := s.rdb.Get(s.ctx, timestampKey).Result()
+	if err != nil && errors.Is(err, redis.Nil) {
+		return fmt.Errorf("failed to get last reset timestamp: %v", err)
+	}
 
-		// Try to reserve capacity for a single tweet
-		tweets, reRun, err := s.services.TweetService.Tweet.Tweets()
-		if err != nil || reRun {
-			continue
-		}
-		reserved, err := s.ReserveTweetCapacity(len(tweets))
+	shouldReset := false
+	if errors.Is(err, redis.Nil) {
+		// No last reset timestamp, need to initialize
+		shouldReset = true
+	} else {
+		lastResetUnix, err := time.Parse(time.RFC3339, lastResetStr)
 		if err != nil {
-			log.Printf("Error reserving tweet capacity: %v", err)
-			continue
-		}
-		if !reserved {
-			continue
+			return fmt.Errorf("failed to parse last reset timestamp: %v", err)
 		}
 
-		// Simulate posting tweet (replace with actual Twitter API call)
-		if err := s.services.TweetService.Tweet.SendTweet(tweets); err != nil {
-			log.Printf("Error posting tweet: %v", err)
-			continue
-		}
-
-		// Update usage statistics
-		if err := s.UpdateUsageStats(1); err != nil {
-			log.Printf("Error updating usage stats: %v", err)
+		// Check if 24 hours have passed since last reset
+		if time.Since(lastResetUnix) >= 24*time.Hour {
+			shouldReset = true
 		}
 	}
-}
 
-func (s *Scheduler) simulatePostTweet() error {
-	// Add random delay to simulate API call
-	time.Sleep(time.Duration(rand.Intn(1000)) * time.Millisecond)
+	if shouldReset {
+		if err := s.resetDailyQuota(); err != nil {
+			return fmt.Errorf("failed to reset quota: %v", err)
+		}
+	}
+
 	return nil
 }
 
-//func main() {
-//	scheduler, err := NewScheduler("localhost:6379")
-//	if err != nil {
-//		log.Fatalf("Failed to create scheduler: %v", err)
-//	}
-//
-//	if err := scheduler.Initialize(); err != nil {
-//		log.Fatalf("Failed to initialize scheduler: %v", err)
-//	}
-//
-//	// Start the scheduler
-//	scheduler.Run()
-//}
+func (s *Scheduler) Run() {
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
+
+	var scheduledTweets []ScheduledTweet
+	var lastDistributionDate time.Time
+
+	for range ticker.C {
+		now := time.Now().In(s.location)
+
+		// Check and reset quota if needed
+		if err := s.checkAndResetQuota(); err != nil {
+			log.Printf("Error checking/resetting quota: %v", err)
+			continue
+		}
+
+		// Recalculate distribution if it's a new day or no schedule exists
+		if now.Day() != lastDistributionDate.Day() {
+			distributions, err := s.calculateDailyDistribution()
+			if err != nil {
+				log.Printf("Error calculating distribution: %v", err)
+				continue
+			}
+
+			// Flatten distributions into scheduled tweets
+			scheduledTweets = nil
+			for _, dist := range distributions {
+				for _, postTime := range dist.Intervals {
+					scheduledTweets = append(scheduledTweets, ScheduledTweet{
+						PostTime: postTime,
+						Executed: false,
+					})
+				}
+			}
+			lastDistributionDate = now
+		}
+
+		// Check for tweets that should be posted
+		for i := range scheduledTweets {
+			if scheduledTweets[i].Executed {
+				continue
+			}
+
+			if math.Abs(now.Sub(scheduledTweets[i].PostTime).Seconds()) <= 30 {
+				tweets, reRun, err := s.services.TweetService.Tweet.Tweets()
+				if err != nil || reRun {
+					continue
+				}
+				reserved, err := s.ReserveTweetCapacity(len(tweets))
+				if err != nil {
+					log.Printf("Error reserving tweet capacity: %v", err)
+					continue
+				}
+				if !reserved {
+					continue
+				}
+
+				// Simulate posting tweet
+				if err = s.services.TweetService.Tweet.SendTweet(tweets); err != nil {
+					log.Printf("Error posting tweet: %v", err)
+					continue
+				}
+
+				// Update usage statistics
+				if err = s.UpdateUsageStats(1); err != nil {
+					log.Printf("Error updating usage stats: %v", err)
+				}
+
+				scheduledTweets[i].Executed = true
+				log.Printf("Posted tweet at %v", now.Format(time.RFC3339))
+			}
+		}
+	}
+}
