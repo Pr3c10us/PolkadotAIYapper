@@ -46,3 +46,9 @@ services:
       GOTWI_API_KEY: ${GOTWI_API_KEY}
       GOTWI_API_KEY_SECRET: ${GOTWI_API_KEY_SECRET}
       BEARER_TOKEN: ${BEARER_TOKEN}
+    networks:
+      - project_net
+
+networks:
+  project_net:
+    driver: bridge

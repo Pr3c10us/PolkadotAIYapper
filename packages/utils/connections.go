@@ -12,7 +12,7 @@ import (
 func NewPGConnection(env *configs.EnvironmentVariables) *sql.DB {
 	// PG_DB instantiation
 	psqlInfo := fmt.Sprintf("host=%s port=%d user=%s "+
-		"password=%s dbname=%s sslmode=disable",
+		"password=%s dbname=%s",
 		env.PostgresDB.Host,
 		env.PostgresDB.Port,
 		env.PostgresDB.Username,
