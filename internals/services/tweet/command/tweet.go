@@ -8,6 +8,7 @@ import (
 	"github.com/Pr3c10us/boilerplate/internals/domains/llm"
 	"github.com/Pr3c10us/boilerplate/internals/domains/xdotcom"
 	"math/rand"
+	"regexp"
 	"strings"
 )
 
@@ -224,6 +225,7 @@ func (service *Tweet) GetTweet(topic, context string) ([]string, error) {
 			fmt.Println(err)
 			return nil, err
 		}
+		response = service.RemoveEmojis(response)
 		if strings.HasPrefix(response, "\"") && strings.HasSuffix(response, "\"") {
 			// Remove the code block markers
 			trimmedInput := strings.TrimPrefix(response, "\"")
@@ -240,7 +242,7 @@ func (service *Tweet) GetTweet(topic, context string) ([]string, error) {
 			fmt.Println(err)
 			return nil, err
 		}
-
+		response = service.RemoveEmojis(response)
 		tweets, err := service.convertToArray(response)
 		if err != nil {
 			fmt.Println(err)
@@ -249,4 +251,14 @@ func (service *Tweet) GetTweet(topic, context string) ([]string, error) {
 
 		return tweets, nil
 	}
+}
+func (service *Tweet) RemoveEmojis(text string) string {
+	// Regular expression pattern to match emojis
+	emojiPattern := `[\x{1F600}-\x{1F64F}\x{1F300}-\x{1F5FF}\x{1F680}-\x{1F6FF}\x{1F700}-\x{1F77F}\x{1F780}-\x{1F7FF}\x{1F800}-\x{1F8FF}\x{1F900}-\x{1F9FF}\x{1FA00}-\x{1FA6F}\x{1FA70}-\x{1FAFF}\x{2600}-\x{26FF}\x{2700}-\x{27BF}\x{2300}-\x{23FF}\x{2B50}\x{2B06}\x{1F004}-\x{1F0CF}]`
+
+	// Compile the regular expression
+	re := regexp.MustCompile(emojiPattern)
+
+	// Replace emojis with an empty string
+	return re.ReplaceAllString(text, "")
 }

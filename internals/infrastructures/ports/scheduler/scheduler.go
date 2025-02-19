@@ -2,6 +2,7 @@ package scheduler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/Pr3c10us/boilerplate/internals/services"
@@ -139,47 +140,58 @@ type ScheduledTweet struct {
 var WeeklySchedule = map[string]DailySchedule{
 	"Monday": {
 		Windows: []PostingWindow{
-			{StartHour: 10, EndHour: 11},
-			{StartHour: 14, EndHour: 16},
-			{StartHour: 19, EndHour: 20},
+			{StartHour: 8, EndHour: 12},
+			{StartHour: 12, EndHour: 14},
+			{StartHour: 14, EndHour: 18},
+			{StartHour: 18, EndHour: 22},
 		},
 	},
 	"Tuesday": {
 		Windows: []PostingWindow{
-			{StartHour: 9, EndHour: 10},
-			{StartHour: 13, EndHour: 15},
-			{StartHour: 22, EndHour: 23},
+			{StartHour: 8, EndHour: 12},
+			{StartHour: 12, EndHour: 14},
+			{StartHour: 14, EndHour: 18},
+			{StartHour: 18, EndHour: 22},
 		},
 	},
 	"Wednesday": {
 		Windows: []PostingWindow{
-			{StartHour: 9, EndHour: 10},
-			{StartHour: 13, EndHour: 15},
-			{StartHour: 17, EndHour: 19},
+			{StartHour: 8, EndHour: 12},
+			{StartHour: 12, EndHour: 14},
+			{StartHour: 14, EndHour: 18},
+			{StartHour: 18, EndHour: 22},
 		},
 	},
 	"Thursday": {
 		Windows: []PostingWindow{
-			{StartHour: 9, EndHour: 10},
-			{StartHour: 14, EndHour: 16},
-			{StartHour: 20, EndHour: 22},
+			{StartHour: 8, EndHour: 12},
+			{StartHour: 12, EndHour: 14},
+			{StartHour: 14, EndHour: 18},
+			{StartHour: 18, EndHour: 22},
 		},
 	},
 	"Friday": {
 		Windows: []PostingWindow{
-			{StartHour: 9, EndHour: 10},
-			{StartHour: 14, EndHour: 16},
+			{StartHour: 8, EndHour: 12},
+			{StartHour: 12, EndHour: 14},
+			{StartHour: 14, EndHour: 18},
+			{StartHour: 18, EndHour: 22},
 		},
 	},
 	"Saturday": {
 		Windows: []PostingWindow{
-			{StartHour: 13, EndHour: 15},
-			{StartHour: 19, EndHour: 21},
+			{StartHour: 8, EndHour: 12},
+			{StartHour: 12, EndHour: 14},
+			{StartHour: 14, EndHour: 18},
+			{StartHour: 18, EndHour: 22},
 		},
 	},
 	"Sunday": {
 		Windows: []PostingWindow{
-			{StartHour: 11, EndHour: 16},
+			{StartHour: 8, EndHour: 12},
+			{StartHour: 12, EndHour: 14},
+			{StartHour: 14, EndHour: 18},
+			{StartHour: 18, EndHour: 22},
 		},
 	},
 }
@@ -394,14 +406,67 @@ func (s *Scheduler) checkAndResetQuota() error {
 	return nil
 }
 
+func (s *Scheduler) GetSchedule() ([]ScheduledTweet, error) {
+	key := RedisKeyPrefix + "schedule"
+
+	scheduleStr, err := s.rdb.Get(s.ctx, key).Result()
+	if err != nil && errors.Is(err, redis.Nil) {
+		return nil, fmt.Errorf("failed to get last reset timestamp: %v", err)
+	}
+
+	if errors.Is(err, redis.Nil) {
+		return nil, nil
+	}
+	var schedules []ScheduledTweet
+	err = json.Unmarshal([]byte(scheduleStr), &schedules)
+	if err != nil {
+		return nil, err
+	}
+	return schedules, nil
+}
+
+func (s *Scheduler) SetSchedule(schedules []ScheduledTweet) error {
+	key := RedisKeyPrefix + "schedule"
+
+	scheduleByte, err := json.Marshal(schedules)
+	if err != nil {
+		return err
+	}
+
+	// Use Redis transaction to update both values atomically
+	txf := func(tx *redis.Tx) error {
+		// Set new quota
+		if err = tx.Set(s.ctx, key, scheduleByte, 0).Err(); err != nil {
+			return err
+		}
+
+		return nil
+	}
+
+	// Retry transaction if it fails due to WATCH
+	for i := 0; i < 3; i++ {
+		err := s.rdb.Watch(s.ctx, txf, key)
+		if err == nil {
+			return nil
+		}
+		if errors.Is(err, redis.TxFailedErr) {
+			continue
+		}
+		return fmt.Errorf("failed to reset quota: %v", err)
+	}
+
+	return fmt.Errorf("failed to reset quota after retries")
+}
+
 func (s *Scheduler) Run() {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 
-	var scheduledTweets []ScheduledTweet
 	var lastDistributionDate time.Time
 
 	for range ticker.C {
+		fmt.Println("Executing Start")
+
 		now := time.Now().In(s.location)
 
 		// Check and reset quota if needed
@@ -418,8 +483,7 @@ func (s *Scheduler) Run() {
 				continue
 			}
 
-			// Flatten distributions into scheduled tweets
-			scheduledTweets = nil
+			var scheduledTweets []ScheduledTweet
 			for _, dist := range distributions {
 				for _, postTime := range dist.Intervals {
 					scheduledTweets = append(scheduledTweets, ScheduledTweet{
@@ -428,7 +492,18 @@ func (s *Scheduler) Run() {
 					})
 				}
 			}
+			err = s.SetSchedule(scheduledTweets)
+			if err != nil {
+				log.Printf("Error storing schedules: %v", err)
+				continue
+			}
 			lastDistributionDate = now
+		}
+
+		scheduledTweets, err := s.GetSchedule()
+		if err != nil {
+			log.Printf("Error getting schedule: %v", err)
+			continue
 		}
 
 		// Check for tweets that should be posted
@@ -437,9 +512,12 @@ func (s *Scheduler) Run() {
 				continue
 			}
 
-			if math.Abs(now.Sub(scheduledTweets[i].PostTime).Seconds()) <= 30 {
+			if math.Abs(now.Sub(scheduledTweets[i].PostTime).Minutes()) <= 5 {
+				fmt.Println("Time to Tweet")
+
 				tweets, reRun, err := s.services.TweetService.Tweet.Tweets()
 				if err != nil || reRun {
+					log.Printf("Error getting tweets: %v", err)
 					continue
 				}
 				reserved, err := s.ReserveTweetCapacity(len(tweets))
@@ -451,7 +529,8 @@ func (s *Scheduler) Run() {
 					continue
 				}
 
-				// Simulate posting tweet
+				fmt.Println(tweets)
+				//posting tweet
 				if err = s.services.TweetService.Tweet.SendTweet(tweets); err != nil {
 					log.Printf("Error posting tweet: %v", err)
 					continue
@@ -463,8 +542,14 @@ func (s *Scheduler) Run() {
 				}
 
 				scheduledTweets[i].Executed = true
+				err = s.SetSchedule(scheduledTweets)
+				if err != nil {
+					log.Printf("Error storing schedules: %v", err)
+					continue
+				}
 				log.Printf("Posted tweet at %v", now.Format(time.RFC3339))
 			}
 		}
+		fmt.Println("Executing End")
 	}
 }
